@@ -1,10 +1,7 @@
-
-
+Greenplum-오브젝트 스토리지 연동 테스트
 PXF로 Greenplum과  S3, GCP, MinIO 연동하기
 
-
-
-### S3 생성
+### AWS S3 연동
 1. 테스트용 AWS 계정 생성
     - https://aws.amazon.com/ko/free/ 에 접속하면 5GB 미만으로 사용시 12개월 테스트 가능
 
@@ -36,8 +33,63 @@ PXF로 Greenplum과  S3, GCP, MinIO 연동하기
       - 모두 선택 후 [정책 검토] 클릭
    7) 정책 검토에서 이름 입력 후 [정책 생성] 클릭
 
+4. Greenplum 연동 테스트
+  1) Greenplum pxf s3 설정
+    $ mkdir $PXF_CONF/servers/s3srvcfg          
+    $ cp $PXF_CONF/templates/s3-site.xml $PXF_CONF/servers/s3srvcfg
+   
+    - 키입력
+      YOUR_AWS_ACCESS_KEY_ID 에 액세스 키 ID 입력 
+      YOUR_AWS_ACCESS_KEY_ID 와 보안 액세스 키 입력         
+      $ cat s3-site.xml
+		<?xml version="1.0" encoding="UTF-8"?>
+		<configuration>
+		  <property>
+		      <name>fs.s3a.access.key</name>
+		      <value>YOUR_AWS_ACCESS_KEY_ID</value>
+		  </property>
+		  <property>
+		      <name>fs.s3a.secret.key</name>
+		      <value>YOUR_AWS_SECRET_ACCESS_KEY</value>
+		  </property>
+		  <property>
+		      <name>fs.s3a.fast.upload</name>
+		      <value>true</value>
+		  </property>
+		</configuration> 
+			
+  2) 설정을 Greenplum 데이터베이스 모든 클러스터에 싱크
+	   $ pxf cluster sync
 
-### GCP 생성
+  3) Greenplum에서 S3데이터 - text format unload/load  
+		CREATE WRITABLE EXTERNAL TABLE aws_s3.ext_w_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=s3:text&SERVER=s3srvcfg')
+		  FORMAT 'CSV' DISTRIBUTED BY (cr_item_sk, cr_order_number);
+		
+		insert into aws_s3.ext_w_catalog_returns select * from tpcds.catalog_returns;
+		
+		CREATE EXTERNAL TABLE aws_s3.ext_r_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=s3:text&SERVER=s3srvcfg')
+		  FORMAT 'CSV' ;
+		
+		insert into aws_s3.catalog_returns_csv select * from aws_s3.ext_r_catalog_returns;
+
+  4) Greenplum에서 S3 데이터 - parquet format unload/load 
+		CREATE WRITABLE EXTERNAL TABLE aws_s3.ext_w_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=s3:parquet&SERVER=s3srvcfg')
+		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_export') DISTRIBUTED BY (cr_item_sk, cr_order_number);
+		
+		insert into aws_s3.ext_w_catalog_returns select * from tpcds.catalog_returns;
+		
+		CREATE EXTERNAL TABLE aws_s3.ext_r_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=s3:parquet&SERVER=s3srvcfg')
+		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_import') ;
+		
+		insert into aws_s3.catalog_returns_parquet select * from aws_s3.ext_r_catalog_returns;
+ 
+
+
+### GCP 연동
 1. 테스트용 구글 계정 생성
    - https://console.cloud.google.com/storage 에 접속하여 계정 생성. 신규 생성 시 90일동안 한화로 약 30만원 정도의 트래픽 사용 가능
 
@@ -68,51 +120,8 @@ PXF로 Greenplum과  S3, GCP, MinIO 연동하기
       - 해당 키.json 파일은 접속이 필요한 서버에 업로드 하여 사용
 
 
-
-### MinIO 생성
-1. minio 다운로드  
-   $ wget https://dl.min.io/server/minio/release/linux-amd64/minio 
-   $ chmod +x minio 
-2. minio 구동 
-   $ ./minio server <스토리지로 사용할 폴더 경로> 
-3. 버킷 생성 
-   http://<minio ip>:9000      
-   계정 : minioadmin/minioadmin 
-   create bucket 클릭 후 생성
-
-
-
-### Greenplum/PXF 셋팅
-1. AWS S3  
-  1) 설정
-    $ mkdir $PXF_CONF/servers/s3srvcfg          
-    $ cp $PXF_CONF/templates/s3-site.xml $PXF_CONF/servers/s3srvcfg
-   
-    - 키입력
-      YOUR_AWS_ACCESS_KEY_ID 에 액세스 키 ID 입력 
-      YOUR_AWS_ACCESS_KEY_ID 와 보안 액세스 키 입력         
-      $ cat s3-site.xml
-		<?xml version="1.0" encoding="UTF-8"?>
-		<configuration>
-		  <property>
-		      <name>fs.s3a.access.key</name>
-		      <value>YOUR_AWS_ACCESS_KEY_ID</value>
-		  </property>
-		  <property>
-		      <name>fs.s3a.secret.key</name>
-		      <value>YOUR_AWS_SECRET_ACCESS_KEY</value>
-		  </property>
-		  <property>
-		      <name>fs.s3a.fast.upload</name>
-		      <value>true</value>
-		  </property>
-		</configuration> 
-			
-  2) 새 서버 구성을 Greenplum 데이터베이스 클러스터에 복사
-	   $ pxf cluster sync
-			
-2. GCP  
-  1) 설정
+4. GCP  Greenplum 연동 테스트
+  1) Greenplum pxf gcp 설정 
     $ mkdir $PXF_CONF/servers/gcssrvcfg
     $ cp $PXF_CONF/templates/gs-site.xml $PXF_CONF/servers/gcssrvcfg/ 
     
@@ -137,11 +146,51 @@ PXF로 Greenplum과  S3, GCP, MinIO 연동하기
 		    </property>
 		</configuration>
     			
-  2) 새 서버 구성을 Greenplum 데이터베이스 클러스터에 복사
+  2) 설정을 Greenplum 데이터베이스 모든 클러스터에 싱크
 	   $ pxf cluster sync
+
+
+  3) Greenplum에서 GCP 데이터 - text format unload/load 
+		CREATE WRITABLE EXTERNAL TABLE gcp.ext_w_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=gs:text&SERVER=gcssrvcfg')
+		  FORMAT 'CSV' DISTRIBUTED BY (cr_item_sk, cr_order_number);
+		
+		insert into gcp.ext_w_catalog_returns select * from tpcds.catalog_returns;
+		
+		CREATE EXTERNAL TABLE gcp.ext_r_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=gs:text&SERVER=gcssrvcfg')
+		  FORMAT 'CSV' ;
+		
+		insert into gcp.catalog_returns_csv select * from gcp.ext_r_catalog_returns; 
+
+   4) Greenplum에서 GCP 데이터 - parquet format unload/load 
+		CREATE WRITABLE EXTERNAL TABLE gcp.ext_w_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=gs:parquet&SERVER=gcssrvcfg')
+		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_export') DISTRIBUTED BY (cr_item_sk, cr_order_number);
+		
+		insert into gcp.ext_w_catalog_returns select * from tpcds.catalog_returns;
+		
+		CREATE EXTERNAL TABLE gcp.ext_r_catalog_returns (like tpcds.catalog_returns)
+		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=gs:parquet&SERVER=gcssrvcfg')
+		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_import') ;
+		
+		insert into gcp.catalog_returns_parquet select * from gcp.ext_r_catalog_returns;
+
+
+### MinIO 생성
+1. minio 다운로드 
+   $ wget https://dl.min.io/server/minio/release/linux-amd64/minio    
+   $ chmod +x minio 
+2. minio 구동 
+   $ ./minio server <스토리지로 사용할 폴더 경로> 
+
+3. 버킷 생성 
+   http://<minio ip>:9000      
+   계정 : minioadmin/minioadmin 
+   create bucket 클릭 후 생성
     
-3. MinIO 
-  1) 설정
+4. MinIO 연동 테스트
+  1) Greenplum pxf Minio 설정 
     $ mkdir $PXF_CONF/servers/minio 
     $ cp $PXF_CONF/templates/minio-site.xml $PXF_CONF/servers/minio/ 
    
@@ -176,69 +225,8 @@ PXF로 Greenplum과  S3, GCP, MinIO 연동하기
 			
   2) 새 서버 구성을 Greenplum 데이터베이스 클러스터에 복사
 	   $ pxf cluster sync
-	   
-
-
-#### Greenplum-오브젝트 스토리지 연동 테스트
-
-1. AWS-S3
- 1) text format unload/load  
-		CREATE WRITABLE EXTERNAL TABLE aws_s3.ext_w_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=s3:text&SERVER=s3srvcfg')
-		  FORMAT 'CSV' DISTRIBUTED BY (cr_item_sk, cr_order_number);
-		
-		insert into aws_s3.ext_w_catalog_returns select * from tpcds.catalog_returns;
-		
-		CREATE EXTERNAL TABLE aws_s3.ext_r_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=s3:text&SERVER=s3srvcfg')
-		  FORMAT 'CSV' ;
-		
-		insert into aws_s3.catalog_returns_csv select * from aws_s3.ext_r_catalog_returns;
-   
-
- 2) parquet format unload/load 
-		CREATE WRITABLE EXTERNAL TABLE aws_s3.ext_w_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=s3:parquet&SERVER=s3srvcfg')
-		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_export') DISTRIBUTED BY (cr_item_sk, cr_order_number);
-		
-		insert into aws_s3.ext_w_catalog_returns select * from tpcds.catalog_returns;
-		
-		CREATE EXTERNAL TABLE aws_s3.ext_r_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=s3:parquet&SERVER=s3srvcfg')
-		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_import') ;
-		
-		insert into aws_s3.catalog_returns_parquet select * from aws_s3.ext_r_catalog_returns;
- 
- 
-2. GCP
- 1) text format unload/load 
-		CREATE WRITABLE EXTERNAL TABLE gcp.ext_w_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=gs:text&SERVER=gcssrvcfg')
-		  FORMAT 'CSV' DISTRIBUTED BY (cr_item_sk, cr_order_number);
-		
-		insert into gcp.ext_w_catalog_returns select * from tpcds.catalog_returns;
-		
-		CREATE EXTERNAL TABLE gcp.ext_r_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=gs:text&SERVER=gcssrvcfg')
-		  FORMAT 'CSV' ;
-		
-		insert into gcp.catalog_returns_csv select * from gcp.ext_r_catalog_returns; 
-
- 2) parquet format unload/load 
-		CREATE WRITABLE EXTERNAL TABLE gcp.ext_w_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=gs:parquet&SERVER=gcssrvcfg')
-		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_export') DISTRIBUTED BY (cr_item_sk, cr_order_number);
-		
-		insert into gcp.ext_w_catalog_returns select * from tpcds.catalog_returns;
-		
-		CREATE EXTERNAL TABLE gcp.ext_r_catalog_returns (like tpcds.catalog_returns)
-		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=gs:parquet&SERVER=gcssrvcfg')
-		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_import') ;
-		
-		insert into gcp.catalog_returns_parquet select * from gcp.ext_r_catalog_returns;
- 
-3. MinIO
- 1) text format unload/load 
+	  
+  3) Greenplum에서 MinIO 데이터 - text format unload/load 
 		CREATE WRITABLE EXTERNAL TABLE minio.ext_w_catalog_returns (like tpcds.catalog_returns)
 		  LOCATION ('pxf://tpcdsdemo/catalog_returns.csv?PROFILE=s3:text&SERVER=minio')
 		  FORMAT 'CSV' DISTRIBUTED BY (cr_item_sk, cr_order_number);
@@ -252,7 +240,7 @@ PXF로 Greenplum과  S3, GCP, MinIO 연동하기
 		insert into minio.catalog_returns_csv select * from minio.ext_r_catalog_returns;
   
   
- 2) parquet format unload/load 
+  4) Greenplum에서 MinIO 데이터 -parquet format unload/load 
 		CREATE WRITABLE EXTERNAL TABLE minio.ext_w_catalog_returns (like tpcds.catalog_returns)
 		  LOCATION ('pxf://tpcdsdemo/catalog_returns.parquet?PROFILE=s3:parquet&SERVER=minio')
 		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_export') DISTRIBUTED BY (cr_item_sk, cr_order_number);  
@@ -264,15 +252,5 @@ PXF로 Greenplum과  S3, GCP, MinIO 연동하기
 		  FORMAT 'CUSTOM' (FORMATTER='pxfwritable_import') ;
 		
 		insert into minio.catalog_returns_parquet select * from minio.ext_r_catalog_returns;
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
+
+		
